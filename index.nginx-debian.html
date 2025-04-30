@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Broadway.js Video Player</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <h1>Видео из Annex-B (H.264)</h1>
+    <canvas id="videoCanvas" width="640" height="480"></canvas>
+
+    <!-- Подключение Broadway.js -->
+    <script src="Broadway/Player/Decoder.js"></script>
+    <script src="Broadway/Player/Player.js"></script>
+    <script>
+        // Инициализация Broadway.js
+        const canvas = document.getElementById('videoCanvas');
+        const player = new Player({
+            useWorker: false, // Использовать Web Workers для улучшения производительности
+	    workerFile: 'Broadway/Player/Decoder.js',
+            webgl: 'true', // Использовать WebGL для рендеринга
+            size: { width: 640, height: 480 } // Размер видео
+        });
+
+        player.canvas = canvas; // Привязываем canvas к плееру
+
+        // Подключение к WebSocket-серверу
+        const ws = new WebSocket('ws://89.104.71.153:8081');
+
+        ws.onopen = () => {
+            console.log('Подключено к WebSocket-серверу');
+        };
+
+        ws.onmessage = (event) => {	
+		const reader = new FileReader();
+reader.onload = () => {
+const arrayBuffer = reader.result;
+console.log(arrayBuffer);
+player.decode(arrayBuffer);
+console.log(player);
+};
+reader.readAsArrayBuffer(event.data);
+console.log(reader);	
+            };
+
+        ws.onerror = (error) => {
+            console.error('Ошибка WebSocket:', error);
+        };
+
+        ws.onclose = () => {
+            console.log('Соединение закрыто');
+        };
+    </script>
+</body>
+</html>
