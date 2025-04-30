@@ -1,5 +1,6 @@
 import { configuration } from "./videoDecoderAndCanvas.js";
 import { getConfiguration, sendCommand } from "./websocket.js";
+import { base64ToArrayBuffer } from "./main.js";
 
 export const recordingDecoder = {
     canvas: undefined,
@@ -13,6 +14,10 @@ export const recordingDecoder = {
     autoPlayTimer: undefined, 
     autoPlayPauseTimeout: undefined,
     recordingPolling: undefined,
+
+    hiddenCanvas: undefined,
+    hiddenCtx: undefined,
+    playSavedFramesId: 0,
 };
 
 export const initRecordingDecoder = () => {
@@ -31,7 +36,6 @@ export const initRecordingDecoder = () => {
         error: e => {
             console.log('[RecordingDecoder] Ошибка декодирования кадра:', e);
             
-
             getConfiguration();
             initRecordingFrames();
             initRecordingDecoder();
@@ -79,6 +83,110 @@ function playRecordingFrame() {
         initRecordingDecoder();
         initRecordingFrames();
     }
+}
+
+function playSavedRecordingFrame(index) {
+    const frames = recordingDecoder.recordingFrames;
+    if (!frames || frames.length === 0 || index < 0 || index >= frames.length) {
+        console.warn('[RecordingDecoder] Неверный индекс кадра или кадры отсутствуют');
+        return;
+    }
+    
+    recordingDecoder.playSavedFramesId++;
+
+    const id = recordingDecoder.playSavedFramesId;
+
+    let keyFrameIndex = index;
+    while (keyFrameIndex > 0 && frames[keyFrameIndex].type !== 'key') {
+        keyFrameIndex--;
+    }
+
+    if (frames[keyFrameIndex].type !== 'key') {
+        while (frames[index].type !== 'key') {
+            index++;
+        }
+
+        keyFrameIndex = index;
+    }
+
+    const hiddenCanvas = recordingDecoder.hiddenCanvas;
+    const hiddenCtx = recordingDecoder.hiddenCtx;
+
+    if (!hiddenCanvas || !hiddenCtx) {
+        console.warn('[RecordingDecoder] Скрытый canvas не инициализирован');
+        return;
+    }
+
+    hiddenCtx.clearRect(0, 0, hiddenCanvas.width, hiddenCanvas.height);
+
+    const drawFrames = frames.slice(keyFrameIndex, index + 1);
+    let numberToPlay = drawFrames.length;
+
+    const hiddenDecoder = new VideoDecoder({
+        output: frame => {
+            console.log(id);
+
+            if (id != recordingDecoder.playSavedFramesId) return;
+
+            console.log('[HiddenDecoder] Получен кадр с размерами:', frame.codedWidth, frame.codedHeight);
+            hiddenCanvas.width = frame.codedWidth;
+            hiddenCanvas.height = frame.codedHeight;
+            hiddenCtx.drawImage(frame, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+
+            numberToPlay--;
+            if (numberToPlay == 0) {
+                // Draw "READY" message on the main visible canvas
+                const canvas = recordingDecoder.canvas;
+                const ctx = recordingDecoder.ctx;
+
+                if (canvas && ctx) {
+                    canvas.width = hiddenCanvas.width;
+                    canvas.height = hiddenCanvas.height;
+
+                    ctx.drawImage(hiddenCanvas, 0, 0);
+                }
+            }
+
+            frame.close();
+        },
+        error: e => {
+            console.log('[HiddenDecoder] Ошибка декодирования кадра:', e);
+            
+            getConfiguration();
+            initRecordingFrames();
+            initRecordingDecoder();
+        }
+    });
+    hiddenDecoder.configure({
+        codec: 'hev1.1.6.L93.B0',
+        hardwareAcceleration: 'prefer-hardware',
+    });
+
+    console.log(drawFrames);
+
+    if (!configuration.isIos) {
+        hiddenDecoder.decode(new EncodedVideoChunk({
+            type: "key",
+            timestamp: drawFrames[0].timestamp,
+            data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
+        }));
+        hiddenDecoder.decode(configuration.configurationFrame);
+    }
+
+    drawFrames.forEach(frame => {
+        try {
+            hiddenDecoder.decode(frame);
+        } catch (e) {
+            console.error('Ошибка декодирования записи:', e);
+    
+            getConfiguration();
+    
+            initRecordingDecoder();
+            initRecordingFrames();
+        }
+    });
+
+    recordingDecoder.currentFrameIndex = index;
 }
 
 function startAutoPlay() {
@@ -147,87 +255,93 @@ function handleRecordingToggle() {
 export function initRecordingCanvas() {
     recordingDecoder.canvas = document.getElementById('recordingCanvas');
     recordingDecoder.ctx = recordingDecoder.canvas.getContext('2d');
+
+    recordingDecoder.hiddenCanvas = document.getElementById('hiddenRecodingCanvas');
+    recordingDecoder.hiddenCtx = recordingDecoder.hiddenCanvas.getContext('2d');
 }
 
 export function addListenerToRecording() {
     document.getElementById('prevFrameBtn').addEventListener('click', () => {
         if (recordingDecoder.currentFrameIndex > 0) {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex--;
-            console.log('[prevFrameBtn] Перемотка назад: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-            playRecordingFrame();
+            console.log('[prevFrameBtn] Перемотка назад: с ', recordingDecoder.currentFrameIndex, ' на ', recordingDecoder.currentFrameIndex - 1);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(recordingDecoder.currentFrameIndex - 1);
         } else {
-            console.log('[prevFrameBtn] Уже на первом кадре: ' + recordingDecoder.currentFrameIndex);
+            console.log('[prevFrameBtn] Уже на первом кадре: ', recordingDecoder.currentFrameIndex);
         }
     });
     
     document.getElementById('rewindBack').addEventListener('click', () => {
         if (recordingDecoder.currentFrameIndex > 0) {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex - 5);
-            console.log('[rewindBack] Перемотка на 5 кадров назад: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-            playRecordingFrame();
+            let newIndex = Math.max(0, recordingDecoder.currentFrameIndex - 5);
+
+            console.log('[rewindBack] Перемотка на 5 кадров назад: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(newIndex);
         } else {
-            console.log('[prevFrameBtn] Уже на первом кадре: ' + recordingDecoder.currentFrameIndex);
+            console.log('[prevFrameBtn] Уже на первом кадре: ', recordingDecoder.currentFrameIndex);
         }
     });
     
     document.getElementById('rewindFramesBack').addEventListener('click', () => {
         if (recordingDecoder.currentFrameIndex > 0) {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex - 10);
-            console.log('[rewindFramesBack] Перемотка на 10 кадров назад: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-            playRecordingFrame();
+            const newIndex = Math.max(0, recordingDecoder.currentFrameIndex - 10);
+
+            console.log('[rewindFramesBack] Перемотка на 10 кадров назад: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(newIndex);
         } else {
-            console.log('[prevFrameBtn] Уже на первом кадре: ' + recordingDecoder.currentFrameIndex);
+            console.log('[prevFrameBtn] Уже на первом кадре: ', recordingDecoder.currentFrameIndex);
         }
     });
     
     document.getElementById('nextFrameBtn').addEventListener('click', () => {
         if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex++;
-            console.log('[nextFrameBtn] Перемотка вперед: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-            playRecordingFrame();
+            const newIndex = recordingDecoder.currentFrameIndex + 1;
+
+            console.log('[nextFrameBtn] Перемотка вперед: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(newIndex);
         } else {
-            console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+            console.log('[nextFrameBtn] Уже на последнем кадре: ', recordingDecoder.currentFrameIndex);
         }
     });
     
     document.getElementById('rewindForward').addEventListener('click', () => {
         if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex - 5);
-            console.log('[rewindForward] Перемотка вперед на 5 кадров: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-            playRecordingFrame();
+            const newIndex = Math.min(recordingDecoder.recordingFrames.length, recordingDecoder.currentFrameIndex + 5);
+
+            console.log('[rewindForward] Перемотка вперед на 5 кадров: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(newIndex);
         } else {
-            console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+            console.log('[nextFrameBtn] Уже на последнем кадре: ', recordingDecoder.currentFrameIndex);
         }
     });
     
     document.getElementById('rewindFramesForward').addEventListener('click', () => {
         if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex - 10);
-            console.log('[rewindFramesForward] Перемотка вперед на 10 кадров: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-            playRecordingFrame();
+            const newIndex = Math.min(recordingDecoder.recordingFrames.length, recordingDecoder.currentFrameIndex + 10);
+
+            console.log('[rewindForward] Перемотка вперед на 10 кадров: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(newIndex);
         } else {
-            console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+            console.log('[nextFrameBtn] Уже на последнем кадре: ', recordingDecoder.currentFrameIndex);
         }
     });
     
     document.getElementById('goToFirstFrame').addEventListener('click', () => {
-        const prevIndex = recordingDecoder.currentFrameIndex;
-        recordingDecoder.currentFrameIndex = 0;
-        console.log(`[goToFirstFrame] Переход к первому кадру: с ${prevIndex} на ${recordingDecoder.currentFrameIndex}`);
-        playRecordingFrame();
+        console.log(`[goToFirstFrame] Переход к первому кадру: с ${recordingDecoder.currentFrameIndex} на 0`);
+
         pauseAutoPlayTemporarily();
+        playSavedRecordingFrame(0);
     });
 
     // Добавляем обработчик события keydown на весь документ
@@ -235,77 +349,78 @@ export function addListenerToRecording() {
         const key = event.key.toLowerCase();
         // Проверяем, какая клавиша была нажата
         if (key === 'i' || key === 'ш') {
-            // Листаем назад при нажатии на "I"
             if (recordingDecoder.currentFrameIndex > 0) {
-                const prevIndex = recordingDecoder.currentFrameIndex;
-                recordingDecoder.currentFrameIndex--;
-                console.log('[prevFrameBtn] Перемотка назад: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-                playRecordingFrame();
+                console.log('[prevFrameBtn] Перемотка назад: с ', recordingDecoder.currentFrameIndex, ' на ', recordingDecoder.currentFrameIndex - 1);
+    
                 pauseAutoPlayTemporarily();
+                playSavedRecordingFrame(recordingDecoder.currentFrameIndex - 1);
             } else {
-                console.log('[prevFrameBtn] Уже на первом кадре: ' + recordingDecoder.currentFrameIndex);
+                console.log('[prevFrameBtn] Уже на первом кадре: ', recordingDecoder.currentFrameIndex);
             }
         } else if (key === 'o' || key === 'щ') {
-            if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-                const prevIndex = recordingDecoder.currentFrameIndex;
-                recordingDecoder.currentFrameIndex++;
-                console.log('[nextFrameBtn] Перемотка вперед: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-                playRecordingFrame();
+            if (recordingDecoder.currentFrameIndex > 0) {
+                let newIndex = Math.max(0, recordingDecoder.currentFrameIndex - 5);
+    
+                console.log('[rewindBack] Перемотка на 5 кадров назад: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+    
                 pauseAutoPlayTemporarily();
+                playSavedRecordingFrame(newIndex);
             } else {
-                console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+                console.log('[prevFrameBtn] Уже на первом кадре: ', recordingDecoder.currentFrameIndex);
             }
         } else if (key === ',' || key === 'б') {
             if (recordingDecoder.currentFrameIndex > 0) {
-                const prevIndex = recordingDecoder.currentFrameIndex;
-                recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex - 10);
-                console.log('[rewindFramesBack] Перемотка на 10 кадров назад: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-                playRecordingFrame();
+                const newIndex = Math.max(0, recordingDecoder.currentFrameIndex - 10);
+    
+                console.log('[rewindFramesBack] Перемотка на 10 кадров назад: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+    
                 pauseAutoPlayTemporarily();
+                playSavedRecordingFrame(newIndex);
             } else {
-                console.log('[prevFrameBtn] Уже на первом кадре: ' + recordingDecoder.currentFrameIndex);
+                console.log('[prevFrameBtn] Уже на первом кадре: ', recordingDecoder.currentFrameIndex);
             }
         } else if (key === 'j' || key === 'о') {
             if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-                const prevIndex = recordingDecoder.currentFrameIndex;
-                recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex - 5);
-                console.log('[rewindForward] Перемотка вперед на 5 кадров: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-                playRecordingFrame();
+                const newIndex = recordingDecoder.currentFrameIndex + 1;
+    
+                console.log('[nextFrameBtn] Перемотка вперед: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+    
                 pauseAutoPlayTemporarily();
+                playSavedRecordingFrame(newIndex);
             } else {
-                console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+                console.log('[nextFrameBtn] Уже на последнем кадре: ', recordingDecoder.currentFrameIndex);
             }
         } else if (key === 'n' || key === 'т') {
             if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-                const prevIndex = recordingDecoder.currentFrameIndex;
-                recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex + 5);
-                console.log('[rewindForward] Перемотка вперед на 5 кадров: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-                playRecordingFrame();
+                const newIndex = Math.min(recordingDecoder.recordingFrames.length, recordingDecoder.currentFrameIndex + 5);
+    
+                console.log('[rewindForward] Перемотка вперед на 5 кадров: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+    
                 pauseAutoPlayTemporarily();
+                playSavedRecordingFrame(newIndex);
             } else {
-                console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+                console.log('[nextFrameBtn] Уже на последнем кадре: ', recordingDecoder.currentFrameIndex);
             }
         } else if (key === 'm' || key === 'ь') {
             if (recordingDecoder.currentFrameIndex < recordingDecoder.recordingFrames.length - 1) {
-                const prevIndex = recordingDecoder.currentFrameIndex;
-                const framesToAdvance = 10;
-                recordingDecoder.currentFrameIndex = Math.max(0, recordingDecoder.currentFrameIndex + 10);
-                console.log('[rewindFramesForward] Перемотка вперед на 10 кадров: с ' + prevIndex + ' на ' + recordingDecoder.currentFrameIndex);
-                playRecordingFrame();
+                const newIndex = Math.min(recordingDecoder.recordingFrames.length, recordingDecoder.currentFrameIndex + 10);
+    
+                console.log('[rewindForward] Перемотка вперед на 10 кадров: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
+    
                 pauseAutoPlayTemporarily();
+                playSavedRecordingFrame(newIndex);
             } else {
-                console.log('[nextFrameBtn] Уже на последнем кадре: ' + recordingDecoder.currentFrameIndex);
+                console.log('[nextFrameBtn] Уже на последнем кадре: ', recordingDecoder.currentFrameIndex);
             }
         }
 
         else if (key === 'k' || key === 'л') {
             handleRecordingToggle();
         } else if (key === 'l' || key === 'д') {
-            const prevIndex = recordingDecoder.currentFrameIndex;
-            recordingDecoder.currentFrameIndex = 0;
-            console.log(`[goToFirstFrame] Переход к первому кадру: с ${prevIndex} на ${recordingDecoder.currentFrameIndex}`);
-            playRecordingFrame();
+            console.log(`[goToFirstFrame] Переход к первому кадру: с ${recordingDecoder.currentFrameIndex} на 0`);
+
             pauseAutoPlayTemporarily();
+            playSavedRecordingFrame(0);
         }
     });
 }

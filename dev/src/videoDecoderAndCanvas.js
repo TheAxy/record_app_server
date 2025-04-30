@@ -42,6 +42,60 @@ const drawFrame = (frame) => {
     //console.log('[Canvas] Кадр отрисован на videoCanvas.');
 };
 
+export function initDecoder() {
+    if (!('VideoDecoder' in window)) {
+        alert('Ваш браузер не поддерживает VideoDecoder (WebCodecs API).');
+        return;
+    }
+
+    canvas = document.getElementById('videoCanvas');
+    ctx = canvas.getContext('2d');
+
+    canvas.addEventListener('click', (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left; // Координата X относительно canvas
+        const y = event.clientY - rect.top; // Координата Y относительно canvas
+    
+        // Нормализация координат в диапазон [0.0, 1.0]
+        const normalizedX = x / canvas.width;
+        const normalizedY = y / canvas.height;
+    
+        console.log(`Клик по координатам: (${normalizedX.toFixed(2)}, ${normalizedY.toFixed(2)})`);
+    
+        sendCommandWithValue("setFocusPoint", {x: normalizedX, y: normalizedY});
+    });
+
+    document.addEventListener('DOMContentLoaded', () => onLoadEvent());
+
+    onLoadEvent();
+
+    videoDecoder = new VideoDecoder({
+        output: frame => {
+            if (!configuration.isIos && !configuration.configurationFrame) {
+                getConfiguration();
+
+                return;
+            }
+
+            drawFrame(frame);
+
+            frame.close();
+        },
+        error: e => {
+            // console.error('Ошибка декодирования:', e);
+            initDecoder();
+            
+            getConfiguration();
+        }
+    });
+
+    videoDecoder.configure({
+        codec: 'hev1.1.6.L93.B0', // h.264 baseline profile
+        hardwareAcceleration: 'prefer-hardware',
+    });
+    console.log('Декодер инициализирован');
+};
+
 function onLoadEvent() {
     isFlippedHorizontally = false;
     isFlippedVertically = false;
@@ -229,57 +283,3 @@ function onLoadEvent() {
     });
 
 }
-
-export function initDecoder() {
-    if (!('VideoDecoder' in window)) {
-        alert('Ваш браузер не поддерживает VideoDecoder (WebCodecs API).');
-        return;
-    }
-
-    canvas = document.getElementById('videoCanvas');
-    ctx = canvas.getContext('2d');
-
-    canvas.addEventListener('click', (event) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = event.clientX - rect.left; // Координата X относительно canvas
-        const y = event.clientY - rect.top; // Координата Y относительно canvas
-    
-        // Нормализация координат в диапазон [0.0, 1.0]
-        const normalizedX = x / canvas.width;
-        const normalizedY = y / canvas.height;
-    
-        console.log(`Клик по координатам: (${normalizedX.toFixed(2)}, ${normalizedY.toFixed(2)})`);
-    
-        sendCommandWithValue("setFocusPoint", {x: normalizedX, y: normalizedY});
-    });
-
-    document.addEventListener('DOMContentLoaded', () => onLoadEvent());
-
-    onLoadEvent();
-
-    videoDecoder = new VideoDecoder({
-        output: frame => {
-            if (!configuration.isIos && !configuration.configurationFrame) {
-                getConfiguration();
-
-                return;
-            }
-
-            drawFrame(frame);
-
-            frame.close();
-        },
-        error: e => {
-            // console.error('Ошибка декодирования:', e);
-            initDecoder();
-            
-            getConfiguration();
-        }
-    });
-
-    videoDecoder.configure({
-        codec: 'hev1.1.6.L93.B0', // h.264 baseline profile
-        hardwareAcceleration: 'prefer-hardware',
-    });
-    console.log('Декодер инициализирован');
-};
