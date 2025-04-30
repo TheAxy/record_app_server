@@ -16,7 +16,7 @@ export let configuration = {
     wasConfigurated: false,
     isConfigurating: false,
     configurationFrame: false,
-    isIos: false,
+    isIos: undefined,
 };
 
 function updateCanvasTransform() {
@@ -42,7 +42,7 @@ const drawFrame = (frame) => {
     //console.log('[Canvas] Кадр отрисован на videoCanvas.');
 };
 
-let uiIntializated = false;
+let uiIntializated;
 
 export function initDecoder() {
     if (!('VideoDecoder' in window)) {

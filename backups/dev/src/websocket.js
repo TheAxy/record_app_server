@@ -1,4 +1,4 @@
-import { configuration, initDecoder, videoDecoder } from "./videoDecoderAndCanvas.js";
+import { configuration, videoDecoder } from "./videoDecoderAndCanvas.js";
 import { recordingDecoder } from "./recoringDecoderAndCanvas.js";
 import { sliders } from "./main.js";
 import { base64ToArrayBuffer } from "./main.js";
@@ -6,7 +6,7 @@ import { base64ToArrayBuffer } from "./main.js";
 let ws = undefined;
 
 function configure(data, type, timestamp) {
-    if (configuration.isIos) return;
+    if (configuration.isIos || configuration.isIos == undefined) return;
 
     configuration.wasConfigurated = false;
 
@@ -35,16 +35,13 @@ function configure(data, type, timestamp) {
 
     videoDecoder.decode(configuration.configurationFrame);
 
-    if (recordingDecoder.isRecording) {
-        recordingDecoder.decoder.decode(new EncodedVideoChunk({
-            type: "key",
-            timestamp: timestamp,
-            data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
-        }));
+    recordingDecoder.decoder.decode(new EncodedVideoChunk({
+        type: "key",
+        timestamp: timestamp,
+        data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
+    }));
 
-        recordingDecoder.decoder.decode(configuration.configurationFrame);
-    }
-    
+    recordingDecoder.decoder.decode(configuration.configurationFrame);
 
     console.log("Configurated");
 
@@ -53,19 +50,23 @@ function configure(data, type, timestamp) {
 }
 
 function processChunk(data, type, timestamp) {
-    if (!videoDecoder || videoDecoder.state === 'closed') {
-        initDecoder();
-    }
+    if (!videoDecoder || videoDecoder.state === 'closed') return;
 
     const chunk = new Uint8Array(base64ToArrayBuffer(data));
 
     try {
+        if (configuration.isIos == undefined) return;
+
         const encodedChunk = new EncodedVideoChunk({
             type: type === 'key' ? 'key' : 'delta',
             timestamp: timestamp, // Используем timestamp из сообщения
             data: chunk
         });
+
+        console.log(recordingDecoder.isRecording, configuration.isIos, configuration);
+
         if (!configuration.isIos && !configuration.wasConfigurated) {
+
             getConfiguration();
 
             return;
@@ -235,10 +236,13 @@ export function sendCommandWithValue(command, value) {
     }
 }
 
+
 let lastCallTime = 0;
 let pendingCallTimeout = null;
 
 export function getConfiguration() {
+    if (configuration.isIos || configuration.isIos == undefined) return;
+
     const now = Date.now();
     const timeSinceLastCall = now - lastCallTime;
 

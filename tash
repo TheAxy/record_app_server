@@ -1,0 +1,29 @@
+[33mcommit 36f4fc8a6b1c7067150f418aa47c5eb1c1b0f7d3[m[33m ([m[1;36mHEAD -> [m[1;32mmaster[m[33m, [m[1;32mrefactor-recordering[m[33m)[m
+Author: root <root@cv4553417.novalocal>
+Date:   Wed Apr 30 22:31:04 2025 +0300
+
+    repair recording
+
+[33mcommit e173c76f9df16be99b5e82fdc4bf92b28012213e[m
+Author: root <root@cv4553417.novalocal>
+Date:   Wed Apr 30 15:53:11 2025 +0300
+
+    take out the backups
+
+[33mcommit 91445749ab49cc857b03d661a7d12529714d5617[m
+Author: root <root@cv4553417.novalocal>
+Date:   Wed Apr 30 14:37:48 2025 +0300
+
+    Refactor index.html
+
+[33mcommit 7252fccd1776d756ea51e0cf1a5d4ed4e4a1598b[m
+Author: root <root@cv4553417.novalocal>
+Date:   Wed Apr 30 12:13:36 2025 +0300
+
+    add gitignore
+
+[33mcommit 59f751b792a7cb666ae0489847c16282ff11e508[m
+Author: root <root@cv4553417.novalocal>
+Date:   Wed Apr 30 12:12:07 2025 +0300
+
+    Initial commit

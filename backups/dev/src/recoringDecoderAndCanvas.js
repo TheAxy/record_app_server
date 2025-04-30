@@ -36,9 +36,9 @@ export const initRecordingDecoder = () => {
         error: e => {
             console.log('[RecordingDecoder] Ошибка декодирования кадра:', e);
             
+            initRecordingDecoder();
             getConfiguration();
             initRecordingFrames();
-            initRecordingDecoder();
         }
     });
     recordingDecoder.decoder.configure({
@@ -56,7 +56,7 @@ function initRecordingFrames() {
     if (!configuration.isIos){
         recordingDecoder.recordingFrames = [
             new EncodedVideoChunk({
-                type:'key',
+                type: "key",
                 timestamp: configuration.configurationFrame.timestamp,
                 data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
             }),
@@ -70,10 +70,6 @@ function initRecordingFrames() {
 }
 
 function playRecordingFrame() {
-    if (!recordingDecoder.decoder || recordingDecoder.decoder.state === 'closed') {
-        return;
-    }
-    
     if (recordingDecoder.recordingFrames.length === 0) {
         console.warn('[Recording] Нет кадров для воспроизведения.');
 
@@ -95,6 +91,13 @@ function playRecordingFrame() {
 }
 
 function playSavedRecordingFrame(index) {
+    if (configuration.isIos) {
+        recordingDecoder.decoder.decode(recordingDecoder.recordingFrames[index]);
+        recordingDecoder.currentFrameIndex = index;
+
+        return;
+    }
+
     const frames = recordingDecoder.recordingFrames;
     if (!frames || frames.length === 0 || index < 0 || index >= frames.length) {
         console.warn('[RecordingDecoder] Неверный индекс кадра или кадры отсутствуют');
@@ -133,14 +136,14 @@ function playSavedRecordingFrame(index) {
 
     const hiddenDecoder = new VideoDecoder({
         output: frame => {
+            console.log(id);
+
             if (id != recordingDecoder.playSavedFramesId) return;
 
             console.log('[HiddenDecoder] Получен кадр с размерами:', frame.codedWidth, frame.codedHeight);
             hiddenCanvas.width = frame.codedWidth;
             hiddenCanvas.height = frame.codedHeight;
             hiddenCtx.drawImage(frame, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
-            
-            frame.close();
 
             numberToPlay--;
             if (numberToPlay == 0) {
@@ -155,6 +158,8 @@ function playSavedRecordingFrame(index) {
                     ctx.drawImage(hiddenCanvas, 0, 0);
                 }
             }
+
+            frame.close();
         },
         error: e => {
             console.log('[HiddenDecoder] Ошибка декодирования кадра:', e);
@@ -366,7 +371,7 @@ export function addListenerToRecording() {
             }
         } else if (key === 'o' || key === 'щ') {
             if (recordingDecoder.currentFrameIndex > 0) {
-                let newIndex = Math.max(0, recordingDecoder.currentFrameIndex + 1);
+                let newIndex = Math.max(0, recordingDecoder.currentFrameIndex - 5);
     
                 console.log('[rewindBack] Перемотка на 5 кадров назад: с ', recordingDecoder.currentFrameIndex + ' на ', newIndex);
     
@@ -424,7 +429,6 @@ export function addListenerToRecording() {
         else if (key === 'k' || key === 'л') {
             handleRecordingToggle();
         } else if (key === 'l' || key === 'д') {
-
             console.log(`[goToFirstFrame] Переход к первому кадру: с ${recordingDecoder.currentFrameIndex} на 0`);
 
             pauseAutoPlayTemporarily();
