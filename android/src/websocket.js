@@ -1,5 +1,5 @@
 import { configuration, initDecoder, videoDecoder } from "./videoDecoderAndCanvas.js";
-import { recordingDecoder } from "./recoringDecoderAndCanvas.js";
+import { initRecordingDecoder, recordingDecoder } from "./recoringDecoderAndCanvas.js";
 import { sliders } from "./main.js";
 import { base64ToArrayBuffer } from "./main.js";
 
@@ -28,7 +28,7 @@ function configure(data, type, timestamp) {
         data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
     }));
 
-    console.log("first frame from server is: ", encodedChunk);
+    console.log("first frame from server is: ", encodedChunk, " while isRecoring=", recordingDecoder.isRecording);
 
     configuration.configurationFrame = encodedChunk;
     configuration.wasConfigurated = true;
@@ -36,6 +36,8 @@ function configure(data, type, timestamp) {
     videoDecoder.decode(configuration.configurationFrame);
 
     if (recordingDecoder.isRecording) {
+        initRecordingDecoder();
+
         recordingDecoder.decoder.decode(new EncodedVideoChunk({
             type: "key",
             timestamp: timestamp,
@@ -86,7 +88,7 @@ function processChunk(data, type, timestamp) {
 };
 
 export function startWebSocket(deviceId) {
-    const wsUrl = `wss://axysites.ru:8082/ws?id=${deviceId}`;
+    const wsUrl = `wss://axysites.online:8082/ws?id=${deviceId}`;
 
     console.log(`WebSocket URL: ${wsUrl}`);
     console.log(`Device ID: ${deviceId}`);
