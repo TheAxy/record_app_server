@@ -59,12 +59,6 @@ function processChunk(data, type, timestamp) {
         initDecoder();
     }
 
-    try {
-        if (videoDecoder && videoDecoder.decodeQueueSize > 4 && type !== 'key') {
-            return;
-        }
-    } catch(_) {}
-
     const chunk = new Uint8Array(base64ToArrayBuffer(data));
 
     try {
@@ -98,11 +92,6 @@ export function startWebSocket(deviceId) {
 
     console.log(`WebSocket URL: ${wsUrl}`);
     console.log(`Device ID: ${deviceId}`);
-
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        try { ws.onmessage = null; ws.onerror = null; ws.onopen = null; ws.onclose = null; } catch(_) {}
-        try { ws.close(1000, 'reconnect'); } catch(_) {}
-    }
 
     ws = new WebSocket(wsUrl);
     ws.onopen = () => {

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>RTT WebSocket Test</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #rtt { font-size: 24px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>RTT WebSocket Test</h1>
+  <p>Текущий RTT (туда-обратно) по WebSocket:</p>
+  <div id="rtt">–</div>
+  <p id="status">Подключение…</p>
+
+  <script>
+    const rttEl = document.getElementById('rtt');
+    const statusEl = document.getElementById('status');
+
+    // подставь нужный node: dubai / europe / usa / default
+    const ws = new WebSocket('wss://axysites.ru/ws?node=europe&id=dev');
+
+    let lastSent = null;
+
+    ws.onopen = () => {
+      statusEl.textContent = 'WebSocket открыт, меряем RTT…';
+      // каждые 1 секунду шлём timestamp
+      setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          lastSent = Date.now();
+          ws.send(JSON.stringify({ t: lastSent }));
+        }
+      }, 1000);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (!data.t || !lastSent) return;
+
+        const now = Date.now();
+        const rtt = now - data.t; // туда-обратно в ms
+        rttEl.textContent = rtt + ' ms';
+      } catch (e) {
+        // игнорируем не наши сообщения
+      }
+    };
+
+    ws.onclose = () => {
+      statusEl.textContent = 'Соединение закрыто';
+    };
+
+    ws.onerror = () => {
+      statusEl.textContent = 'Ошибка WebSocket';
+    };
+  </script>
+</body>
+</html>

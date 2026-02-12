@@ -39,16 +39,51 @@ export const sliders = {
         element: 'bitrate-slider',
         value: 'bitrate-value',
         command: 'setBitrate',
-        step: 100,
-        range: {min: 1000, max: 17500}
+        step: 10000,
+        range: {min: 10000, max: 10000000}
     },
     fps: {element: 'fps-slider', value: 'fps-value', command: 'setFps', step: 1, range: {min: 1, max: 100}},
     focus: {
         element: 'focus-slider',
         value: 'focus-value',
         command: 'setFocus',
-        step: 0.1,
+        step: 0.01,
         range: {min: 0.1, max: 10}
+    },
+    yellow: {
+        element: 'yellow-slider',
+        value: 'yellow-value',
+        command: 'setYellowFilter',
+        step: 100,
+        range: {min: 1000, max: 10000}
+    },
+    noise: {
+        element: 'noise-slider',
+        value: 'noise-value',
+        command: 'setNoiseFilter',
+        step: 1,
+        range: {min: -10, max: 10}
+    },
+    sharpen: {
+        element: 'sharpen-slider',
+        value: 'sharpen-value',
+        command: 'setSharpenFilter',
+        step: 1,
+        range: {min: -10, max: 10}
+    },
+    clarity: {
+        element: 'clarity-slider',
+        value: 'clarity-value',
+        command: 'setClarityFilter',
+        step: 1,
+        range: {min: -10, max: 10}
+    },
+    shadow: {
+        element: 'shadow-slider',
+        value: 'shadow-value',
+        command: 'setShadowFilter',
+        step: 1,
+        range: {min: -10, max: 10}
     },
 };
 

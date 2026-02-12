@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>TikTok OAuth Callback</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #fafafa;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .container {
+      text-align: center;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin-bottom: 0.5em;
+      color: #e60023; /* TikTok red accent */
+    }
+    p {
+      margin: 0.5em 0;
+    }
+    code {
+      display: block;
+      margin: 1em auto;
+      padding: 0.5em;
+      background: #f0f0f0;
+      border-radius: 4px;
+      word-break: break-all;
+    }
+    .success {
+      color: #28a745;
+    }
+    .error {
+      color: #dc3545;
+    }
+    button {
+      margin-top: 1em;
+      padding: 0.5em 1em;
+      font-size: 1em;
+      cursor: pointer;
+      background: #e60023;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Авторизация TikTok</h1>
+    <p id="message">Обрабатываем...</p>
+    <code id="code"></code>
+    <button id="closeBtn" style="display:none;">Закрыть окно</button>
+  </div>
+
+  <script>
+    function getQueryParam(name) {
+      const url = new URL(window.location.href);
+      return url.searchParams.get(name);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const code = getQueryParam('code');
+      const error = getQueryParam('error');
+
+      const msgEl = document.getElementById('message');
+      const codeEl = document.getElementById('code');
+      const btn = document.getElementById('closeBtn');
+
+      if (code) {
+        msgEl.textContent = 'Авторизация прошла успешно! Ваш код:';
+        msgEl.classList.add('success');
+        codeEl.textContent = code;
+        btn.style.display = 'inline-block';
+      } else if (error) {
+        msgEl.textContent = 'Ошибка авторизации: ' + error;
+        msgEl.classList.add('error');
+      } else {
+        msgEl.textContent = 'Параметр code не найден в URL';
+        msgEl.classList.add('error');
+      }
+
+      btn.addEventListener('click', () => window.close());
+    });
+  </script>
+</body>
+</html>
