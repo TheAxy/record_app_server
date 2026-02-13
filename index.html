@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>H.264 Streaming Client</title>
+    <title>H.264 Client</title>
 
     <link rel="stylesheet" href="assets/css/lib/nouislider.min.css">
     <link rel="stylesheet" href="assets/css/assets.css">
@@ -17,14 +17,6 @@
 </head>
 
 <body>
-    <!-- <canvas id="videoCanvas" width="640" height="480"></canvas> -->
-    <!-- <canvas id="recordingCanvas" width="640" height="480"></canvas> -->
-    <div class="controls">
-        <!-- <button id="startRecordingBtn">Начать запись</button> -->
-        <!-- <button id="stopRecordingBtn">Стоп запись</button> -->
-        <!-- <button id="prevFrameBtn">Назад</button>
-    <button id="nextFrameBtn">Вперед</button> -->
-    </div>
 
     <main>
         <div class="page__wrap">
@@ -354,7 +346,8 @@
         // const wsUrl = `wss://axysites.ru:8081/ws?id=${deviceId}`;
 
         const canvas = document.getElementById('videoCanvas');
-        const ctx = canvas.getContext('2d');
+        const ctx1 = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true, desynchronized: true });
         let videoDecoder;
         let ws;
         let recordId = 0;
@@ -381,6 +374,10 @@
         let currentContrast = 1.0;
         let streamingInterval;
 
+        let recEvery = 2; // 1 = каждый кадр, 2 = через один
+        let recCounter = 0;
+        let lastW = 0, lastH = 0;
+
         const initDecoder = () => {
             if (!('VideoDecoder' in window)) {
                 alert('Ваш браузер не поддерживает VideoDecoder (WebCodecs API).');
@@ -403,12 +400,27 @@
         };
 
 
-        const drawFrame = (frame) => {
+        const drawFrame1 = (frame) => {
             if (!frame) return;
             canvas.width = frame.codedWidth;
             canvas.height = frame.codedHeight;
             ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
             //console.log('[Canvas] Кадр отрисован на videoCanvas.');
+        };
+
+        const drawFrame = (frame) => {
+            if (!frame) return;
+
+            const w = frame.codedWidth;
+            const h = frame.codedHeight;
+
+            if (w !== lastW || h !== lastH) {
+                canvas.width = w;
+                canvas.height = h;
+                lastW = w; lastH = h;
+            }
+
+            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
         };
 
         const base64ToArrayBuffer = (base64) => {
@@ -570,14 +582,27 @@
 
                     switch (message.command) {
                         // ====== запись ======
-                        case "recordingData":
+                        case "recordingData1":
                             console.log('[Fetch] Получены данные записи:', message.recording);
-                            recordingFrames = message.recording.recording || [];
+                            // recordingFrames = message.recording.recording || [];
+                            serverRecordingFrames = message.recording || [];
                             console.log('[Fetch] Количество кадров записи:', recordingFrames.length);
                             if (recordingFrames.length > 0 && currentFrameIndex >= recordingFrames.length) {
                                 currentFrameIndex = recordingFrames.length - 1;
                             }
                             break;
+
+                        case "recordingData":
+                            console.log('[Fetch] Получены данные записи:', message.recording);
+
+                            serverRecordingFrames = Array.isArray(message.recording) ? message.recording : [];
+                            console.log('[Fetch] Количество кадров записи (server):', serverRecordingFrames.length);
+
+                            if (serverRecordingFrames.length > 0 && currentFrameIndex >= serverRecordingFrames.length) {
+                                currentFrameIndex = serverRecordingFrames.length - 1;
+                            }
+                            break;
+
 
                         // ====== наш новый таймстамп для задержки ======
                         case "frameTimestamp":
@@ -611,30 +636,26 @@
                             processChunk(data, type, frameTimestamp);
 
                             if (isRecording) {
-                                // Сохраняем текущий canvas как изображение
                                 if (canvas.width > 0 && canvas.height > 0) {
                                     try {
-                                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                                        recordingFrames.push({
-                                            imageData: imageData,
-                                            timestamp: frameTimestamp, // используем переименованную переменную
-                                            width: canvas.width,
-                                            height: canvas.height,
-                                            index: recordingFrames.length
-                                        });
-
-                                        console.log(`[Recording] Сохранен canvas кадр ${recordingFrames.length} (${canvas.width}x${canvas.height})`);
-
-                                        // Оптимизация: ограничиваем частоту логирования
-                                        if (recordingFrames.length % 10 === 0) {
-                                            console.log(`[Recording] Всего сохранено: ${recordingFrames.length} кадров`);
+                                        recCounter++;
+                                        if (recCounter % recEvery === 0) {
+                                            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                                            recordingFrames.push({ imageData, timestamp: frameTimestamp, width: canvas.width, height: canvas.height });
                                         }
+
+                                        // ✅ чтобы “запись” шла почти онлайн
+                                        if (followLive) {
+                                            currentFrameIndex = recordingFrames.length - 1;
+                                            playRecordingFrame();
+                                        }
+
                                     } catch (e) {
                                         console.error('[Recording] Ошибка сохранения кадра:', e);
                                     }
                                 }
                             }
-                            break;
+                            break
                         }
                         case "photoFrame":
                         case "newPhoto": {
@@ -724,34 +745,35 @@
             startWebSocket();
         });
 
-        const processChunk = (data, type, timestamp) => {
+        const processChunk1 = (data, type, timestamp) => {
             if (!videoDecoder || videoDecoder.state === 'closed') return;
 
-            const chunk = new Uint8Array(base64ToArrayBuffer(data));
+            // data может быть base64 (из JSON newFrame), либо Uint8Array (из бинарного WS)
+            const chunk = (data instanceof Uint8Array)
+                ? data
+                : new Uint8Array(base64ToArrayBuffer(data));
+
             try {
                 const encodedChunk = new EncodedVideoChunk({
-                    type: type === 'key' ? 'key' : 'delta',
-                    timestamp: timestamp, // Используем timestamp из сообщения
-                    data: chunk
+                type: type === 'key' ? 'key' : 'delta',
+                timestamp: timestamp,
+                data: chunk
                 });
 
+                // костыль для первого кадра оставляем как у тебя
                 if (isFisrtFrame) {
-                    isFisrtFrame = false;
-                    firstFrame = encodedChunk;
+                isFisrtFrame = false;
+                firstFrame = encodedChunk;
 
-                    videoDecoder.decode(new EncodedVideoChunk({
-                        type: "key",
-                        timestamp: timestamp, // Используем timestamp из сообщения
-                        data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
-                    }));
+                videoDecoder.decode(new EncodedVideoChunk({
+                    type: "key",
+                    timestamp: timestamp,
+                    data: new Uint8Array(base64ToArrayBuffer("AAAAASYBrwle+Y7/24Z7syM/nOpk20/t7vdxrQuI3qkpP1YFNZIYloFO5bs5x7Q+CB6LJlC2np9bI1plTB2GJ1xYqtAnqnHTAPh92TF3bhc")),
+                }));
                 }
 
-                if (type === 'key') {
-                    //console.log('Получен ключевой кадр');
-                }
-                if (isRecording) {
-                    recordingFrames.push(encodedChunk);
-                }
+                // ❗ВАЖНО: НЕ добавляем encodedChunk в recordingFrames.
+                // recordingFrames у нас хранит ТОЛЬКО imageData-кадры.
 
                 videoDecoder.decode(encodedChunk);
             } catch (e) {
@@ -759,9 +781,33 @@
             }
         };
 
+        const processChunk = (data, type, timestamp) => {
+            if (!videoDecoder || videoDecoder.state === 'closed') return;
+
+            // если очередь раздулась, дропаем дельты
+            if (videoDecoder.decodeQueueSize > 2 && type !== 'key') return;
+
+            const chunk = (data instanceof Uint8Array)
+                ? data
+                : new Uint8Array(base64ToArrayBuffer(data));
+
+            try {
+                videoDecoder.decode(new EncodedVideoChunk({
+                type: type === 'key' ? 'key' : 'delta',
+                timestamp,
+                data: chunk
+                }));
+            } catch (e) {
+                console.error('decode error:', e);
+            }
+        };
+
         // --- ЗАПИСЬ!!! ---
         const recordingCanvas = document.getElementById('recordingCanvas');
-        const recCtx = recordingCanvas.getContext('2d');
+        const recCtx1 = recordingCanvas.getContext('2d');
+
+        const recCtx = recordingCanvas.getContext('2d', { willReadFrequently: true, desynchronized: true });
+
 
         let recordingDecoder;
         let recordingFrames = [];
@@ -771,6 +817,9 @@
         const frameInterval = 100;
         let recordingPolling;
         let isConfigurated = false;
+
+        let followLive = true;
+        let serverRecordingFrames = [];
 
         const initRecordingDecoder = () => {
             if (!('VideoDecoder' in window)) {
@@ -794,7 +843,7 @@
             console.log('Декодер записи инициализирован');
         };
 
-        function initRecordingFrames() {
+        function initRecordingFrames1() {
             recordingFrames = [];
 
             currentFrameIndex = 0;
@@ -819,6 +868,11 @@
             }
         }
 
+        function initRecordingFrames() {
+            recordingFrames = [];
+            currentFrameIndex = 0;
+        }
+
         // function playRecordingFrame() {
         //     if (recordingFrames.length === 0) {
         //         console.warn('[Recording] Нет кадров для воспроизведения.');
@@ -839,7 +893,7 @@
         //     }
         // }
 
-        function playRecordingFrame() {
+        function playRecordingFrame1() {
             if (recordingFrames.length === 0) {
                 console.log('[Recording] Нет сохраненных кадров');
                 return;
@@ -882,8 +936,40 @@
             }
         }
 
+        function playRecordingFrame() {
+            if (!recordingFrames || recordingFrames.length === 0) {
+                console.log('[Recording] Нет сохраненных кадров');
+                return;
+            }
 
-        function startAutoPlay() {
+            if (currentFrameIndex < 0) currentFrameIndex = 0;
+            if (currentFrameIndex >= recordingFrames.length) {
+                currentFrameIndex = recordingFrames.length - 1;
+            }
+
+            const frame = recordingFrames[currentFrameIndex];
+
+            // frame должен быть {imageData, width, height, ...}
+            if (!frame || !frame.imageData) {
+                console.error('[Recording] Нет данных в кадре:', frame);
+                return;
+            }
+
+            try {
+                recordingCanvas.width = frame.width || frame.imageData.width || 640;
+                recordingCanvas.height = frame.height || frame.imageData.height || 480;
+
+                recCtx.putImageData(frame.imageData, 0, 0);
+
+                // лог можно оставить, но он будет спамить
+                // console.log(`[Recording] Показан кадр ${currentFrameIndex + 1}/${recordingFrames.length}`);
+            } catch (e) {
+                console.error('[Recording] Ошибка отрисовки кадра:', e);
+            }
+        }
+
+
+        function startAutoPlay1() {
             // Если нет кадров - не запускаем автоплей
             if (!isConfigurated && firstFrame) {
                 isConfigurated = true;
@@ -909,13 +995,38 @@
             }, 30);
         }
 
+        function startAutoPlay() {
+            clearInterval(autoPlayTimer);
+
+            autoPlayTimer = setInterval(() => {
+                if (!recordingFrames || recordingFrames.length === 0) return;
+
+                // Пока идёт запись: показываем последний кадр (почти онлайн)
+                if (isRecording && followLive) {
+                currentFrameIndex = recordingFrames.length - 1;
+                playRecordingFrame();
+                return;
+                }
+
+                // Обычный режим (после записи / после ручной прокрутки)
+                if (currentFrameIndex < recordingFrames.length - 1) {
+                currentFrameIndex++;
+                playRecordingFrame();
+                } else {
+                // НЕ уходим в 0, иначе ты снова будешь вечно “отставать”
+                // просто остаёмся на последнем кадре
+                currentFrameIndex = recordingFrames.length - 1;
+                playRecordingFrame();
+                }
+            }, 30);
+        }
+
         function pauseAutoPlayTemporarily() {
+            followLive = false;
             clearInterval(autoPlayTimer);
             clearTimeout(autoPlayPauseTimeout);
-            // autoPlayPauseTimeout = setTimeout(() => {
-            //   startAutoPlay();
-            // }, 3000);
         }
+
 
         function checkJiter(ms) {
             const jiter = document.querySelector('.jiter')
@@ -930,11 +1041,17 @@
             }
         }
         // TODO
-        function fetchRecording() {
+        function fetchRecording1() {
             console.log("[Recording] Получение всей записи...");
 
             ws.send(JSON.stringify({ command: 'getRecording', offset: currentFrameIndex }));
         }
+
+        function fetchRecording() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ command: 'getRecording' }));
+        }
+
 
         // Функция для отправки команды на сервер через WebSocket */
 
@@ -950,13 +1067,16 @@
 
         // Обработка данных о записи, полученных через WebSocket
         function handleRecordingData(data) {
-            console.log('[Recording] Обработка данных записи из WebSocket:', data);
-            recordingFrames = data.recording || [];
-            console.log('[Recording] Обновлено количество кадров записи:', recordingFrames.length);
-            if (recordingFrames.length > 0 && currentFrameIndex >= recordingFrames.length) {
-                currentFrameIndex = recordingFrames.length - 1;
-            }
+            console.log('[Recording] Получены данные записи с сервера:', data);
+
+            // С сервера приходит массив {timestamp, data: base64}
+            // Это НЕ подходит для playRecordingFrame(), который рисует imageData.
+            // Поэтому мы храним это отдельно, если надо.
+            serverRecordingFrames = data.recording || [];
+
+            console.log('[Recording] serverRecordingFrames:', serverRecordingFrames.length);
         }
+
 
         // Объединённый обработчик для кнопки "Начать запись"
         // document.getElementById('startRecordingBtn').addEventListener('click', () => {
@@ -995,7 +1115,8 @@
                 btn.textContent = 'Начать запись (K)';
                 btn.style.backgroundColor = '#007bff'; // Возвращаем синий цвет
                 btn.style.color = 'white';
-            } else {
+            } 
+            else {
                 console.log('[UI] Запуск записи');
                 if (!firstFrame) {
                     alert("Дождитесь начала видео потока перед началом записи.");
@@ -1005,6 +1126,7 @@
 
                 initRecordingFrames();
 
+                followLive = true;
                 recordId++;
                 let recordIdHere = recordId;
 
