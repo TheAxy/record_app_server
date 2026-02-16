@@ -378,6 +378,8 @@
         let recCounter = 0;
         let lastW = 0, lastH = 0;
 
+        let firstBin = true;
+
         const initDecoder = () => {
             if (!('VideoDecoder' in window)) {
                 alert('Ваш браузер не поддерживает VideoDecoder (WebCodecs API).');
@@ -556,20 +558,20 @@
                     // 1) БИНАРНЫЙ КАДР (видео)
                     if (event.data instanceof ArrayBuffer) {
                         const chunk = new Uint8Array(event.data);
-                        const ts = Date.now(); // или свой timestamp
-                        // type можешь подставить нужный, если он тебе важен
-                        processChunk(chunk, 'video', ts);
+                        const tsUs = Math.round(performance.now() * 1000); // микросекунды
+                        processChunk(chunk, firstBin ? 'key' : 'delta', tsUs);
+                        firstBin = false;
                         return;
                     }
 
                     if (event.data instanceof Blob) {
-                        const buffer = await event.data.arrayBuffer();
-                        const chunk = new Uint8Array(buffer);
-                        const ts = Date.now();
-                        processChunk(chunk, 'video', ts);
+                        const buf = await event.data.arrayBuffer();
+                        const chunk = new Uint8Array(buf);
+                        const tsUs = Math.round(performance.now() * 1000);
+                        processChunk(chunk, firstBin ? 'key' : 'delta', tsUs);
+                        firstBin = false;
                         return;
                     }
-
                     // 2) ТЕКСТОВОЕ СООБЩЕНИЕ (JSON)
                     if (typeof event.data !== 'string') {
                         console.warn('Неизвестный тип сообщения:', typeof event.data);
@@ -781,26 +783,47 @@
             }
         };
 
-        const processChunk = (data, type, timestamp) => {
-            if (!videoDecoder || videoDecoder.state === 'closed') return;
+        let needKey = true;
 
-            // если очередь раздулась, дропаем дельты
-            if (videoDecoder.decodeQueueSize > 2 && type !== 'key') return;
+        function isKeyframeAnnexB(u8) {
+        for (let i = 0; i < u8.length - 5; i++) {
+            let p = -1;
+            if (u8[i]===0 && u8[i+1]===0 && u8[i+2]===1) p = i+3;
+            else if (u8[i]===0 && u8[i+1]===0 && u8[i+2]===0 && u8[i+3]===1) p = i+4;
+            if (p < 0) continue;
 
-            const chunk = (data instanceof Uint8Array)
-                ? data
-                : new Uint8Array(base64ToArrayBuffer(data));
+            // H.264 IDR NAL = 5
+            const h264 = u8[p] & 0x1f;
+            if (h264 === 5) return true;
 
-            try {
-                videoDecoder.decode(new EncodedVideoChunk({
-                type: type === 'key' ? 'key' : 'delta',
-                timestamp,
-                data: chunk
-                }));
-            } catch (e) {
-                console.error('decode error:', e);
-            }
+            // H.265 IDR = 19/20
+            const h265 = (u8[p] >> 1) & 0x3f;
+            if (h265 === 19 || h265 === 20) return true;
+        }
+        return false;
+        }
+
+        const processChunk = (data, _type, timestamp) => {
+        if (!videoDecoder || videoDecoder.state === 'closed') return;
+
+        const chunk = data instanceof Uint8Array ? data : new Uint8Array(base64ToArrayBuffer(data));
+        const isKey = isKeyframeAnnexB(chunk);
+
+        if (needKey && !isKey) return; // дропаем до key
+        if (isKey) needKey = false;
+
+        try {
+            videoDecoder.decode(new EncodedVideoChunk({
+            type: isKey ? 'key' : 'delta',
+            timestamp,
+            data: chunk
+            }));
+        } catch (e) {
+            console.error('decode error:', e);
+            if (e?.name === 'DataError') needKey = true; // опять ждём key
+        }
         };
+
 
         // --- ЗАПИСЬ!!! ---
         const recordingCanvas = document.getElementById('recordingCanvas');
@@ -1118,11 +1141,11 @@
             } 
             else {
                 console.log('[UI] Запуск записи');
-                if (!firstFrame) {
-                    alert("Дождитесь начала видео потока перед началом записи.");
+                // if (!firstFrame) {
+                //     alert("Дождитесь начала видео потока перед началом записи.");
 
-                    return;
-                }
+                //     return;
+                // }
 
                 initRecordingFrames();
 
